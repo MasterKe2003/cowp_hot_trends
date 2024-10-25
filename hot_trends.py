@@ -2,14 +2,12 @@ import requests
 import plugins
 from plugins import *
 from bridge.context import ContextType
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 
-BASE_URL_VVHAN = "https://api.vvhan.com/api/" #https://api.vvhan.com/
-
 @plugins.register(name="hot_trends",
-                  desc="热搜插件",
+                  desc="微博热搜",
                   version="1.0",
                   author="masterke",
                   desire_priority=100)
@@ -21,16 +19,23 @@ class hot_trends(Plugin):
         logger.info(f"[{__class__.__name__}] inited")
 
     def get_help_text(self, **kwargs):
-        help_text = f"目前支持的热搜类型有: \n微博热搜、知乎热搜、哔哩哔哩热搜、贴吧热搜、抖音热搜、IT资讯"
+        help_text = f"发送【微博热搜】"
         return help_text
 
     def on_handle_context(self, e_context: EventContext):
-        # 只处理文本消息
         if e_context['context'].type != ContextType.TEXT:
             return
         self.content = e_context["context"].content.strip()
-        if self.content in ["微博热搜","知乎热搜","哔哩哔哩热搜","贴吧热搜","抖音热搜","IT资讯"]:
+        if self.content in ["微博热搜"]:
             logger.info(f"[{__class__.__name__}] 收到消息: {self.content}")
+            config_path = os.path.join(os.path.dirname(__file__),"config.json")
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as file:
+                    self.config_data = json.load(file)
+            else:
+                logger.error(f"请先配置{config_path}文件")
+                return
+
             reply = Reply()
             result = self.hot_trends()
             if result != None:
@@ -45,36 +50,26 @@ class hot_trends(Plugin):
                 e_context.action = EventAction.BREAK_PASS
 
     def hot_trends(self):
-        # 热榜类型         
-        match(self.content):
-            case "微博热搜": hot_trends_type = "wbHot"
-            case "知乎热搜": hot_trends_type = "zhihuHot"
-            case "哔哩哔哩热搜": hot_trends_type = "bili"
-            case "贴吧热搜": hot_trends_type = "baiduRY"
-            case "抖音热搜": hot_trends_type = "douyinHot"
-            case "IT资讯":hot_trends_type = "itNews"
-
-        url = BASE_URL_VVHAN + "hotlist?type=" + hot_trends_type
+        url = "https://v2.alapi.cn/api/new/wbtop"
+        payload = {'num':"10",'token': self.config_data['alapi_token']}
         try:
-            response = requests.get(url)
+            response = requests.post(url, data=payload)
             if response.status_code == 200:
                 json_data = response.json()
                 print(json_data)
-                if isinstance(json_data, dict) and json_data['success'] == True:
-                    result = f"🚀更新时间：{json_data['update_time']}"
-                    topics = json_data['data']
-                    for i, topic in enumerate(topics[:10], 1):
-                        hot = topic.get('hot', '无热度参数, 0')
-                        formatted_str = f"\n{i}. {topic['title']} ({hot} 浏览)\nURL: {topic['url']}"
-                        result += formatted_str
-                    logger.info(result)
-                    return result
+                if isinstance(json_data, dict) and json_data['msg'] == "success":
+                    print(json_data)
+                    reply_message = ""
+                    for item in json_data['data']:
+                        title = item['hot_word']
+                        url = quote(item['url'])
+                        # 将标题和链接添加到字符串中，之间加上一些分隔符，如换行符或空格
+                        reply_message += f"【{title}】\n{url}\n\n"
+                    return reply_message
                 else:
-                    logger.error(f"热搜接口返回数据异常:{json_data}")
+                    logger.error(f"hot_trends返回异常:{json_data}")
             else:
-                logger.error(f"热搜接口返回状态码错误:{response.status_code}")
+                logger.error(f"hot_trends状态码错误:{response.status_code}")
         except Exception as e:
-            logger.error(f"热搜接口抛出异常:{e}")
-                
-        logger.error("所有接口都挂了,无法获取")
+            logger.error(f"hot_trends抛出异常:{e}")
         return None
