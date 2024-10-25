@@ -1,0 +1,1 @@
+from .hot_trends import *
